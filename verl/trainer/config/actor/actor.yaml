@@ -286,7 +286,9 @@ profiler:
       # Whether to fail on unknown stage or missing msprobe
       strict: ${oc.select:global_profiler.global_tool_config.precision_debugger.strict,False}
 
-# Router replay configuration for MoE models
+# Router replay configuration for MoE models.
+# The Megatron/VeOmni workers read actor.{megatron,veomni}.router_replay.
+# A non-disabled value here is copied onto that engine field when the engine is still disabled.
 router_replay:
 
   # Target dataclass for this configuration

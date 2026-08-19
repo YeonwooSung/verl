@@ -221,6 +221,31 @@ class ActorConfig(BaseConfig):
         if self.loss_agg_mode not in valid_loss_agg_modes:
             raise ValueError(f"Invalid loss_agg_mode: {self.loss_agg_mode}")
 
+    def sync_router_replay_to_engine(self, engine) -> None:
+        """Forward ``actor.router_replay`` onto the engine config the worker reads.
+
+        The documented key is ``actor_rollout_ref.actor.router_replay``. The
+        Megatron/VeOmni workers read ``actor.{megatron,veomni}.router_replay``.
+        Copy the actor-level setting when the engine is still disabled, and
+        fail if both are set to different non-disabled modes.
+        """
+        actor_rr = getattr(self, "router_replay", None)
+        engine_rr = getattr(engine, "router_replay", None)
+        if actor_rr is None or engine_rr is None:
+            return
+        actor_mode = getattr(actor_rr, "mode", "disabled")
+        engine_mode = getattr(engine_rr, "mode", "disabled")
+        if actor_mode != "disabled" and engine_mode != "disabled" and actor_mode != engine_mode:
+            raise ValueError(
+                "Conflicting router_replay modes: "
+                f"actor.router_replay.mode={actor_mode!r} vs engine.router_replay.mode={engine_mode!r}. "
+                "Set only one, or make them match."
+            )
+        if actor_mode != "disabled" and engine_mode == "disabled":
+            object.__setattr__(engine_rr, "mode", actor_mode)
+            object.__setattr__(engine_rr, "record_file", getattr(actor_rr, "record_file", None))
+            object.__setattr__(engine_rr, "replay_file", getattr(actor_rr, "replay_file", None))
+
     def validate(self, n_gpus: int, train_batch_size: int, model_config: dict = None):
         """Validate actor configuration with runtime parameters."""
         if not self.use_dynamic_bsz:
@@ -285,6 +310,7 @@ class McoreActorConfig(ActorConfig):
         """Validate FSDP actor configuration parameters."""
         super().__post_init__()
         self.engine = self.megatron
+        self.sync_router_replay_to_engine(self.megatron)
 
 
 @dataclass
@@ -367,6 +393,7 @@ class VeOmniActorConfig(ActorConfig):
         """Validate VeOmni actor configuration parameters."""
         super().__post_init__()
         self.engine = self.veomni
+        self.sync_router_replay_to_engine(self.veomni)
         if self.veomni.router_replay.mode != "disabled" and not self.use_remove_padding:
             raise RuntimeError(
                 "router_replay requires use_remove_padding=True. In VeOmni engine, "
